@@ -58,7 +58,7 @@
     <!-- MAIN SCRIPT AS ES MODULE -->
     <script type="module">
       /***************************************************************
-       * 1) IMPORTS FROM CDN (No 'three' specifier needed)
+       * 1) IMPORTS FROM CDN (No bare 'three' specifier)
        ***************************************************************/
       import * as THREE from 'https://unpkg.com/three@0.172.0/build/three.module.js';
       import { GLTFLoader } from 'https://unpkg.com/three@0.172.0/examples/jsm/loaders/GLTFLoader.js';
@@ -372,7 +372,7 @@
 
           if (index > maxIndex) {
             index = maxIndex;
-            // isPlaying = false; // (optional auto-stop)
+            // isPlaying = false; // optional auto-stop
           }
 
           const next = Math.min(index + 1, maxIndex);
