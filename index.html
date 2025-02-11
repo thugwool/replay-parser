@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Three.js Replay Viewer – Single File</title>
+    <title>Shavit Replay Viewer – Import Map Version</title>
     <style>
       body {
         margin: 0;
@@ -35,8 +35,19 @@
         line-height: 1.4;
       }
     </style>
-  </head>
 
+    <!-- 1) IMPORT MAP with three, three/addons, and dat.gui -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/",
+        "dat.gui": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js"
+      }
+    }
+    </script>
+
+  </head>
   <body>
     <!-- UI Panel for map & replay file inputs + controls -->
     <div id="uiPanel">
@@ -56,17 +67,15 @@
     <!-- Info display at bottom -->
     <div id="headerInfo"></div>
 
-    <!-- MAIN SCRIPT AS ES MODULE -->
+    <!-- 2) Our main logic as an ES module referencing the import map -->
     <script type="module">
-      /***************************************************************
-       * 1) IMPORTS FROM CDN
-       ***************************************************************/
-      import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
-      import { GLTFLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
-      import { GUI } from 'https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js';
+      // ****************** Imports via the Import Map ******************
+      import * as THREE from 'three';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+      import { GUI } from 'dat.gui';
 
       /***************************************************************
-       * 2) INLINE REPLAY PARSER: parseShavitReplay()
+       * 1) INLINE REPLAY PARSER: parseShavitReplay()
        ***************************************************************/
       async function parseShavitReplay(file) {
         const arrayBuffer = await file.arrayBuffer();
@@ -201,7 +210,7 @@
       }
 
       /***************************************************************
-       * 3) MAIN REPLAY VIEWER CODE
+       * 2) MAIN REPLAY VIEWER CODE
        ***************************************************************/
       // Create scene & camera
       const scene = new THREE.Scene();
@@ -373,7 +382,6 @@
 
           if (index > maxIndex) {
             index = maxIndex;
-            // isPlaying = false; // optional auto-stop
           }
 
           const next = Math.min(index + 1, maxIndex);
