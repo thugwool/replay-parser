@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Shavit Replay Parser by Wool</title>
+    <title>Three.js Shavit Replay Parser</title>
     <style>
       body {
         margin: 0;
@@ -36,7 +36,7 @@
       }
     </style>
 
-    <!-- 1) IMPORT MAP with three, three/addons, and dat.gui -->
+    <!-- 1) Import Map (for Three, addons, dat.GUI) -->
     <script type="importmap">
     {
       "imports": {
@@ -46,7 +46,6 @@
       }
     }
     </script>
-
   </head>
   <body>
     <!-- UI Panel for map & replay file inputs + controls -->
@@ -55,7 +54,7 @@
       <input type="file" id="mapFile" accept=".gltf,.glb" />
 
       <label>Replay (.replay):</label>
-      <input type="file" id="replayFile" />
+      <input type="file" id="replayFile" accept=".replay,.rec" />
 
       <div style="margin-top:8px;">
         <button id="playBtn">Play</button>
@@ -67,15 +66,17 @@
     <!-- Info display at bottom -->
     <div id="headerInfo"></div>
 
-    <!-- 2) Our main logic as an ES module referencing the import map -->
+    <!-- MAIN SCRIPT AS ES MODULE (import map references) -->
     <script type="module">
-      // ****************** Imports via the Import Map ******************
+      /***************************************************************
+       * 1) Imports
+       ***************************************************************/
       import * as THREE from 'three';
       import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
       import { GUI } from 'dat.gui';
 
       /***************************************************************
-       * 1) INLINE REPLAY PARSER: parseShavitReplay()
+       * 2) INLINE REPLAY PARSER: parseShavitReplay()
        ***************************************************************/
       async function parseShavitReplay(file) {
         const arrayBuffer = await file.arrayBuffer();
@@ -125,7 +126,7 @@
         let mapName = "";
         let style = 0, track = 0, preFrames = 0;
         let frameCount = 0, fTime = 0;
-        let steamID = 0, postFrames = 0, tickrate = 100; // fallback
+        let steamID = 0, postFrames = 0, tickrate = 100;
         let zoneOffset = [0, 0];
 
         // 2) BASIC FIELDS (ver >=3)
@@ -133,7 +134,7 @@
           mapName = readCString(256);
           style = readUint8();
           track = readUint8();
-          preFrames = readInt32(); 
+          preFrames = readInt32();
         }
         frameCount = readInt32();
         fTime = readFloat32();
@@ -150,7 +151,7 @@
         }
         if (version >= 5) {
           postFrames = readInt32();
-          tickrate = readFloat32(); 
+          tickrate = readFloat32();
           if (version < 7) {
             frameCount -= postFrames;
           }
@@ -210,18 +211,12 @@
       }
 
       /***************************************************************
-       * 2) MAIN REPLAY VIEWER CODE
+       * 3) MAIN REPLAY VIEWER CODE
        ***************************************************************/
-      // Create scene & camera
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x222222);
 
-      const camera = new THREE.PerspectiveCamera(
-        75,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        5000
-      );
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
       camera.rotation.order = 'YXZ'; // for pitch/yaw usage
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -236,13 +231,6 @@
       dirLight.position.set(100, 200, 100);
       scene.add(dirLight);
 
-      // Global state
-      let mapMesh = null;
-      let replayData = null;
-      let isPlaying = false;
-      let playbackTime = 0;
-      let frameTime = 1 / 100; // fallback
-
       // Fallback plane & grid
       const fallbackPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(2000, 2000),
@@ -254,7 +242,16 @@
       const fallbackGrid = new THREE.GridHelper(2000, 50);
       scene.add(fallbackGrid);
 
-      // HTML references
+      // Globals
+      let mapMesh = null;
+      let replayData = null;
+      let isPlaying = false;
+      let playbackTime = 0;
+      let frameTime = 1 / 100; // fallback
+      const clock = new THREE.Clock();
+      const EYE_OFFSET = 35; // so camera isn't underground
+
+      // HTML refs
       const mapFileInput = document.getElementById('mapFile');
       const replayFileInput = document.getElementById('replayFile');
       const playBtn = document.getElementById('playBtn');
@@ -262,7 +259,7 @@
       const resetBtn = document.getElementById('resetBtn');
       const headerInfo = document.getElementById('headerInfo');
 
-      // DAT.GUI for map transform
+      // DAT.GUI
       const mapSettings = {
         rotateX: -90,
         offsetX: 0,
@@ -270,6 +267,7 @@
         offsetZ: 0,
         scale: 1.0,
       };
+
       const gui = new GUI();
       gui.add(mapSettings, 'rotateX', -180, 180, 1).name('rotateX(deg)').onChange(updateMapTransform);
       gui.add(mapSettings, 'offsetX', -10000, 10000, 1).name('offsetX').onChange(updateMapTransform);
@@ -289,24 +287,31 @@
         mapMesh.scale.set(mapSettings.scale, mapSettings.scale, mapSettings.scale);
       }
 
-      // LOAD MAP
+      /***************************************************************
+       * 4) LOAD EVENTS (Map / Replay)
+       ***************************************************************/
       mapFileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        loadMapFile(file);
+      });
 
-        const url = URL.createObjectURL(file);
+      replayFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        await loadReplayFile(file);
+      });
+
+      async function loadMapFile(blob) {
+        const url = URL.createObjectURL(blob);
         const loader = new GLTFLoader();
         loader.load(
           url,
           (gltf) => {
-            // Remove fallback
-            scene.remove(fallbackPlane);
-            scene.remove(fallbackGrid);
-
+            removeFallback();
             if (mapMesh) scene.remove(mapMesh);
-            mapMesh = gltf.scene;
 
-            // Center bounding box so map is at origin
+            mapMesh = gltf.scene;
             const box = new THREE.Box3().setFromObject(mapMesh);
             const center = new THREE.Vector3();
             box.getCenter(center);
@@ -319,15 +324,12 @@
           undefined,
           (err) => console.error('Error loading map:', err)
         );
-      });
+      }
 
-      // LOAD REPLAY
-      replayFileInput.addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
+      async function loadReplayFile(blob) {
         try {
-          replayData = await parseShavitReplay(file);
+          const replay = await parseShavitReplay(blob);
+          replayData = replay;
           console.log(
             'Replay loaded:',
             replayData.mapName,
@@ -335,8 +337,6 @@
             'frames, tickrate=',
             replayData.tickrate
           );
-
-          // Use replay's tickrate if valid
           if (replayData.tickrate && replayData.tickrate > 1) {
             frameTime = 1 / replayData.tickrate;
           } else {
@@ -354,9 +354,47 @@
           console.error('Replay parse error:', err);
           alert(err.message);
         }
-      });
+      }
 
-      // PLAYBACK CONTROLS
+      function removeFallback() {
+        scene.remove(fallbackPlane);
+        scene.remove(fallbackGrid);
+      }
+
+      /***************************************************************
+       * 5) AUTO-LOAD DEFAULT MAP & REPLAY
+       ***************************************************************/
+      const DEFAULT_MAP_URL = './demo-files/maps/bhop_zzzz.glb';
+      const DEFAULT_REPLAY_URL = './demo-files/replays/bhop_zzzz.replay';
+
+      async function loadDefaultResources() {
+        // 1) Load Map (GLB) from relative path
+        const mapResponse = await fetch(DEFAULT_MAP_URL);
+        if (!mapResponse.ok) {
+          console.error(`Failed to fetch default map at ${DEFAULT_MAP_URL}`);
+          return;
+        }
+        const mapBlob = await mapResponse.blob();
+        await loadMapFile(mapBlob);
+
+        // 2) Load Replay from relative path
+        const replayResponse = await fetch(DEFAULT_REPLAY_URL);
+        if (!replayResponse.ok) {
+          console.error(`Failed to fetch default replay at ${DEFAULT_REPLAY_URL}`);
+          return;
+        }
+        const replayBlob = await replayResponse.blob();
+        await loadReplayFile(replayBlob);
+
+        console.log('Default map & replay loaded automatically!');
+      }
+
+      // Call the auto-load once the script is ready
+      loadDefaultResources();
+
+      /***************************************************************
+       * 6) PLAYBACK CONTROLS
+       ***************************************************************/
       playBtn.addEventListener('click', () => {
         isPlaying = true;
       });
@@ -367,10 +405,9 @@
         playbackTime = 0;
       });
 
-      // ANIMATION
-      const clock = new THREE.Clock();
-      const EYE_OFFSET = 35; // so camera isn't underground
-
+      /***************************************************************
+       * 7) ANIMATION LOOP
+       ***************************************************************/
       function animate() {
         requestAnimationFrame(animate);
         const delta = clock.getDelta();
@@ -380,9 +417,7 @@
           let index = Math.floor(playbackTime / frameTime);
           const maxIndex = replayData.frames.length - 1;
 
-          if (index > maxIndex) {
-            index = maxIndex;
-          }
+          if (index > maxIndex) index = maxIndex;
 
           const next = Math.min(index + 1, maxIndex);
           const t = (playbackTime / frameTime) - index;
@@ -399,7 +434,6 @@
           const zx = replayData.zoneOffset[0];
           const zy = replayData.zoneOffset[1];
 
-          // In Three.js, Y is up
           camera.position.set(x + zx, z + EYE_OFFSET, -(y + zy));
 
           // Interpolate angles
@@ -414,7 +448,9 @@
       }
       animate();
 
-      // WINDOW RESIZE
+      /***************************************************************
+       * 8) WINDOW RESIZE
+       ***************************************************************/
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
