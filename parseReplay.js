@@ -5,6 +5,7 @@
  * - zoneOffset usage if version >= 8 (2D offset)
  * - DO NOT zero out frames by the first frame
  */
+
 export async function parseShavitReplay(file) {
   const arrayBuffer = await file.arrayBuffer();
   const data = new DataView(arrayBuffer);
@@ -66,7 +67,7 @@ export async function parseShavitReplay(file) {
     mapName = readCString(256);
     style = readUint8();
     track = readUint8();
-    preFrames = readInt32(); // might be older usage
+    preFrames = readInt32(); // older usage if version <7
   }
 
   frameCount = readInt32();
@@ -80,6 +81,7 @@ export async function parseShavitReplay(file) {
   if (version >= 4) {
     steamID = readInt32();
   } else {
+    // older replay with string auth
     const sAuth = readCString(32);
     // parse if needed
     steamID = parseInt(sAuth.replace(/[^\d]/g, ""));
@@ -96,10 +98,8 @@ export async function parseShavitReplay(file) {
     }
   }
 
-  // if version>=8 => read zone offset
+  // if version >=8 => read zone offset
   if (version >= 8) {
-    // stored as float or int? Shavit code used readInt for fZoneOffset if compiled that way.
-    // We'll assume floats, if the plugin used view_as<int>(float).
     zoneOffset[0] = readFloat32();
     zoneOffset[1] = readFloat32();
   }
@@ -133,11 +133,12 @@ export async function parseShavitReplay(file) {
     frames.push({
       origin: { x: px, y: py, z: pz },
       angles: { pitch, yaw },
-      buttons
+      buttons,
     });
   }
 
-  // DO NOT zero out frames by first frame. We'll rely on zoneOffset if needed
+  // DO NOT zero out frames by first frame
+  // We'll rely on zoneOffset if needed
 
   return {
     version,
@@ -151,6 +152,6 @@ export async function parseShavitReplay(file) {
     postFrames,
     tickrate,
     zoneOffset,
-    frames
+    frames,
   };
 }
