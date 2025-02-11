@@ -1,8 +1,8 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { GUI } from 'dat.gui';
-import { parseShavitReplay } from './parseReplay.js'; // <-- Import the parser here
 
+  import * as THREE from 'https://unpkg.com/three@0.148.0/build/three.module.js';
+  import { GLTFLoader } from 'https://unpkg.com/three@0.148.0/examples/jsm/loaders/GLTFLoader.js';
+  import { GUI } from 'https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js';
+  import { parseShavitReplay } from './parseReplay.js';
 /**
  * 1) SCENE + CAMERA
  */
