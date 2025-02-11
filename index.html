@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Shavit Replay Full Playback</title>
+    <title>Three.js Replay Viewer – Single File</title>
     <style>
       body {
         margin: 0;
@@ -28,7 +28,7 @@
         bottom: 10px;
         left: 10px;
         z-index: 9999;
-        background: rgba(255,255,255,0.8);
+        background: rgba(255, 255, 255, 0.8);
         padding: 8px;
         border-radius: 5px;
         font-size: 14px;
@@ -37,6 +37,7 @@
     </style>
   </head>
   <body>
+    <!-- UI Panel for map & replay file inputs + controls -->
     <div id="uiPanel">
       <label>Map (.glb):</label>
       <input type="file" id="mapFile" accept=".gltf,.glb" />
@@ -51,9 +52,365 @@
       </div>
     </div>
 
+    <!-- Info display at bottom -->
     <div id="headerInfo"></div>
 
-    <!-- Our logic in main.js, plus the parser in parseReplay.js -->
-    <script type="module" src="./main.js"></script>
+    <!-- MAIN SCRIPT AS ES MODULE -->
+    <script type="module">
+      /***************************************************************
+       * 1) IMPORTS FROM CDN (No 'three' specifier needed)
+       ***************************************************************/
+      import * as THREE from 'https://unpkg.com/three@0.172.0/build/three.module.js';
+      import { GLTFLoader } from 'https://unpkg.com/three@0.172.0/examples/jsm/loaders/GLTFLoader.js';
+      import { GUI } from 'https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js';
+
+      /***************************************************************
+       * 2) INLINE REPLAY PARSER: parseShavitReplay()
+       ***************************************************************/
+      async function parseShavitReplay(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const data = new DataView(arrayBuffer);
+        let offset = 0;
+
+        function readUint8() {
+          if (offset + 1 > data.byteLength) throw Error(`EOF@${offset}`);
+          return data.getUint8(offset++);
+        }
+        function readInt32() {
+          if (offset + 4 > data.byteLength) throw Error(`EOF@${offset}`);
+          const val = data.getInt32(offset, true);
+          offset += 4;
+          return val;
+        }
+        function readFloat32() {
+          if (offset + 4 > data.byteLength) throw Error(`EOF@${offset}`);
+          const val = data.getFloat32(offset, true);
+          offset += 4;
+          return val;
+        }
+        function readCString(maxLen) {
+          let str = "";
+          for (let i = 0; i < maxLen; i++) {
+            if (offset >= data.byteLength) break;
+            const b = data.getUint8(offset++);
+            if (b === 0) break;
+            str += String.fromCharCode(b);
+          }
+          return str.trim();
+        }
+
+        // 1) HEADER
+        let headerLine = "";
+        while (offset < data.byteLength) {
+          const b = data.getUint8(offset++);
+          if (b === 0x0A || b === 0x0D) break;
+          headerLine += String.fromCharCode(b);
+        }
+        const [verToken, formatToken] = headerLine.split(":");
+        const version = parseInt(verToken, 10);
+        if (formatToken !== "{SHAVITREPLAYFORMAT}{FINAL}") {
+          throw Error("Unrecognized replay format!");
+        }
+
+        let mapName = "";
+        let style = 0, track = 0, preFrames = 0;
+        let frameCount = 0, fTime = 0;
+        let steamID = 0, postFrames = 0, tickrate = 100; // fallback
+        let zoneOffset = [0, 0];
+
+        // 2) BASIC FIELDS (ver >=3)
+        if (version >= 3) {
+          mapName = readCString(256);
+          style = readUint8();
+          track = readUint8();
+          preFrames = readInt32(); 
+        }
+        frameCount = readInt32();
+        fTime = readFloat32();
+
+        if (version < 7) {
+          frameCount -= preFrames;
+        }
+        if (version >= 4) {
+          steamID = readInt32();
+        } else {
+          // older replay with string auth
+          const sAuth = readCString(32);
+          steamID = parseInt(sAuth.replace(/[^\d]/g, ""));
+        }
+        if (version >= 5) {
+          postFrames = readInt32();
+          tickrate = readFloat32(); 
+          if (version < 7) {
+            frameCount -= postFrames;
+          }
+        }
+        if (version >= 8) {
+          zoneOffset[0] = readFloat32();
+          zoneOffset[1] = readFloat32();
+        }
+
+        // 3) FRAME READING
+        let frameSize = 24; // older
+        if (version >= 2) frameSize = 32;
+        if (version >= 6) frameSize = 40;
+
+        const frames = [];
+        for (let i = 0; i < frameCount; i++) {
+          if (offset + frameSize > data.byteLength) {
+            throw Error(`Frame #${i} incomplete!`);
+          }
+          const px = readFloat32();
+          const py = readFloat32();
+          const pz = readFloat32();
+          const pitch = readFloat32();
+          const yaw = readFloat32();
+          const buttons = readInt32();
+
+          if (version >= 2) {
+            readInt32(); // flags
+            readInt32(); // movetype
+          }
+          if (version >= 6) {
+            readInt32(); // mousexy
+            readInt32(); // vel
+          }
+
+          frames.push({
+            origin: { x: px, y: py, z: pz },
+            angles: { pitch, yaw },
+            buttons,
+          });
+        }
+
+        return {
+          version,
+          mapName,
+          style,
+          track,
+          preFrames,
+          frameCount,
+          fTime,
+          steamID,
+          postFrames,
+          tickrate,
+          zoneOffset,
+          frames,
+        };
+      }
+
+      /***************************************************************
+       * 3) MAIN REPLAY VIEWER CODE
+       ***************************************************************/
+      // Create scene & camera
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x222222);
+
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        5000
+      );
+      camera.rotation.order = 'YXZ'; // for pitch/yaw usage
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // Lights
+      const ambLight = new THREE.AmbientLight(0x404040);
+      scene.add(ambLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+      dirLight.position.set(100, 200, 100);
+      scene.add(dirLight);
+
+      // Global state
+      let mapMesh = null;
+      let replayData = null;
+      let isPlaying = false;
+      let playbackTime = 0;
+      let frameTime = 1 / 100; // fallback
+
+      // Fallback plane & grid
+      const fallbackPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(2000, 2000),
+        new THREE.MeshBasicMaterial({ color: 0x777777, wireframe: true })
+      );
+      fallbackPlane.rotation.x = -Math.PI / 2;
+      scene.add(fallbackPlane);
+
+      const fallbackGrid = new THREE.GridHelper(2000, 50);
+      scene.add(fallbackGrid);
+
+      // HTML references
+      const mapFileInput = document.getElementById('mapFile');
+      const replayFileInput = document.getElementById('replayFile');
+      const playBtn = document.getElementById('playBtn');
+      const pauseBtn = document.getElementById('pauseBtn');
+      const resetBtn = document.getElementById('resetBtn');
+      const headerInfo = document.getElementById('headerInfo');
+
+      // DAT.GUI for map transform
+      const mapSettings = {
+        rotateX: -90,
+        offsetX: 0,
+        offsetY: 0,
+        offsetZ: 0,
+        scale: 1.0,
+      };
+      const gui = new GUI();
+      gui.add(mapSettings, 'rotateX', -180, 180, 1).name('rotateX(deg)').onChange(updateMapTransform);
+      gui.add(mapSettings, 'offsetX', -10000, 10000, 1).name('offsetX').onChange(updateMapTransform);
+      gui.add(mapSettings, 'offsetY', -10000, 10000, 1).name('offsetY').onChange(updateMapTransform);
+      gui.add(mapSettings, 'offsetZ', -10000, 10000, 1).name('offsetZ').onChange(updateMapTransform);
+      gui.add(mapSettings, 'scale', 0.001, 1000, 0.001).name('scale').onChange(updateMapTransform);
+
+      function updateMapTransform() {
+        if (!mapMesh) return;
+        const rx = THREE.MathUtils.degToRad(mapSettings.rotateX);
+        mapMesh.rotation.set(rx, 0, 0);
+        mapMesh.position.set(
+          mapSettings.offsetX,
+          mapSettings.offsetY,
+          mapSettings.offsetZ
+        );
+        mapMesh.scale.set(mapSettings.scale, mapSettings.scale, mapSettings.scale);
+      }
+
+      // LOAD MAP
+      mapFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const url = URL.createObjectURL(file);
+        const loader = new GLTFLoader();
+        loader.load(
+          url,
+          (gltf) => {
+            // Remove fallback
+            scene.remove(fallbackPlane);
+            scene.remove(fallbackGrid);
+
+            if (mapMesh) scene.remove(mapMesh);
+            mapMesh = gltf.scene;
+
+            // Center bounding box so map is at origin
+            const box = new THREE.Box3().setFromObject(mapMesh);
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            mapMesh.position.sub(center);
+
+            updateMapTransform();
+            scene.add(mapMesh);
+            console.log('Map loaded, bounding center=', center);
+          },
+          undefined,
+          (err) => console.error('Error loading map:', err)
+        );
+      });
+
+      // LOAD REPLAY
+      replayFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+          replayData = await parseShavitReplay(file);
+          console.log(
+            'Replay loaded:',
+            replayData.mapName,
+            replayData.frames.length,
+            'frames, tickrate=',
+            replayData.tickrate
+          );
+
+          // Use replay's tickrate if valid
+          if (replayData.tickrate && replayData.tickrate > 1) {
+            frameTime = 1 / replayData.tickrate;
+          } else {
+            frameTime = 1 / 100;
+          }
+
+          headerInfo.innerHTML = `
+            <strong>Map:</strong> ${replayData.mapName}<br/>
+            <strong>Frames:</strong> ${replayData.frames.length}<br/>
+            <strong>Tickrate:</strong> ${replayData.tickrate.toFixed(2)}
+          `;
+          playbackTime = 0;
+          isPlaying = false;
+        } catch (err) {
+          console.error('Replay parse error:', err);
+          alert(err.message);
+        }
+      });
+
+      // PLAYBACK CONTROLS
+      playBtn.addEventListener('click', () => {
+        isPlaying = true;
+      });
+      pauseBtn.addEventListener('click', () => {
+        isPlaying = false;
+      });
+      resetBtn.addEventListener('click', () => {
+        playbackTime = 0;
+      });
+
+      // ANIMATION
+      const clock = new THREE.Clock();
+      const EYE_OFFSET = 35; // so camera isn't underground
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+
+        if (replayData && isPlaying) {
+          playbackTime += delta;
+          let index = Math.floor(playbackTime / frameTime);
+          const maxIndex = replayData.frames.length - 1;
+
+          if (index > maxIndex) {
+            index = maxIndex;
+            // isPlaying = false; // (optional auto-stop)
+          }
+
+          const next = Math.min(index + 1, maxIndex);
+          const t = (playbackTime / frameTime) - index;
+
+          const f1 = replayData.frames[index];
+          const f2 = replayData.frames[next];
+
+          // Interpolate position
+          const x = THREE.MathUtils.lerp(f1.origin.x, f2.origin.x, t);
+          const y = THREE.MathUtils.lerp(f1.origin.y, f2.origin.y, t);
+          const z = THREE.MathUtils.lerp(f1.origin.z, f2.origin.z, t);
+
+          // zoneOffset from replay
+          const zx = replayData.zoneOffset[0];
+          const zy = replayData.zoneOffset[1];
+
+          // In Three.js, Y is up
+          camera.position.set(x + zx, z + EYE_OFFSET, -(y + zy));
+
+          // Interpolate angles
+          const yaw = THREE.MathUtils.lerp(f1.angles.yaw, f2.angles.yaw, t);
+          const pitch = THREE.MathUtils.lerp(f1.angles.pitch, f2.angles.pitch, t);
+          camera.rotation.x = THREE.MathUtils.degToRad(-pitch);
+          camera.rotation.y = THREE.MathUtils.degToRad(yaw - 90);
+          camera.rotation.z = 0;
+        }
+
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      // WINDOW RESIZE
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
   </body>
 </html>
