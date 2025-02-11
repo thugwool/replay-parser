@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Wool's Replay Parser</title>
+  <style>
+    body {
+      margin: 0; 
+      overflow: hidden;
+      font-family: sans-serif;
+      background: #aaa;
+    }
+    #uiPanel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 9999;
+      background: rgba(255, 255, 255, 0.8);
+      padding: 8px;
+      border-radius: 5px;
+    }
+    #uiPanel label {
+      display: block;
+      margin: 8px 0 4px;
+    }
+    #headerInfo {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(255,255,255,0.8);
+      padding: 8px;
+      border-radius: 5px;
+      text-align: right;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    /* dat.GUI floats in top-right corner by default (z-index automatically high). */
+  </style>
+</head>
+<body>
+  <!-- UI Panel -->
+  <div id="uiPanel">
+    <label>Map file (.glb):</label>
+    <input type="file" id="mapFile" accept=".gltf,.glb">
+    
+    <label>Replay file (.rec):</label>
+    <input type="file" id="replayFile">
+
+    <div style="margin-top:8px;">
+      <button id="playBtn">Play</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+  </div>
+
+  <!-- Info about loaded replay -->
+  <div id="headerInfo"></div>
+
+  <!-- Our main JS code, as ES Module -->
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

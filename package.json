@@ -1,0 +1,16 @@
+{
+    "name": "replay-parser",
+    "version": "1.0.0",
+    "scripts": {
+      "start": "vite",
+      "build": "vite build"
+    },
+    "dependencies": {
+      "three": "^0.146.0",
+      "dat.gui": "^0.7.7"
+    },
+    "devDependencies": {
+      "vite": "^4.0.0"
+    }
+  }
+  
